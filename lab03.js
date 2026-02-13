@@ -60,7 +60,7 @@ db.customers.aggregate([
 
 ])
 
-// Clasifique a los clientes en tres categorías según su balance total
+// 2.2 Clasifique a los clientes en tres categorías según su balance total
 db.customers.aggregate([
 
   {
@@ -111,7 +111,7 @@ db.customers.aggregate([
 
 ])
 
-// Para cada ciudad, identifique el cliente con el mayor balance total sumando todas sus cuentas
+// 2.3 Para cada ciudad, identifique el cliente con el mayor balance total sumando todas sus cuentas
 db.customers.aggregate([
 
   {
@@ -168,4 +168,125 @@ db.customers.aggregate([
 
 ])
 
+// 2.4 Extraiga las 10 transacciones más altas realizadas en los últimos 6 meses 
+// y enriquezca el resultado con información del cliente asociado
+db.transactions.aggregate([
+    
+  { $unwind: "$transactions" },
 
+  {
+    $match: {
+      "transactions.date": {
+        $gte: {
+          $dateSubtract: {
+            startDate: "$$NOW",
+            unit: "month",
+            amount: 6
+          }
+        }
+      }
+    }
+  },
+
+  {
+    $sort: {
+      "transactions.amount": -1
+    }
+  },
+
+  { $limit: 10 },
+
+  {
+    $lookup: {
+      from: "customers",
+      localField: "account_id",
+      foreignField: "accounts",
+      as: "customerData"
+    }
+  },
+
+  { $unwind: "$customerData" },
+
+  {
+    $project: {
+      _id: 0,
+      customerName: "$customerData.name",
+      email: "$customerData.email",
+      account_id: 1,
+      amount: "$transactions.amount",
+      date: "$transactions.date"
+    }
+  }
+
+])
+
+
+// 2.5 Para cada cliente, calcule la variación porcentual entre su 
+// transacción más reciente y la más antigua. Solo incluya clientes con al menos dos transacciones
+db.transactions.aggregate([
+  {
+    $project: {
+      account_id: 1,
+      transaccionesOrdenadas: {
+        $sortArray: {
+          input: "$transactions",
+          sortBy: { date: 1 }
+        }
+      }
+    }
+  },
+
+  {
+    $project: {
+      account_id: 1,
+      total: { $size: "$transaccionesOrdenadas" },
+      primera: { $arrayElemAt: ["$transaccionesOrdenadas", 0] },
+      ultima: {
+        $arrayElemAt: [
+          "$transaccionesOrdenadas",
+          { $subtract: [{ $size: "$transaccionesOrdenadas" }, 1] }
+        ]
+      }
+    }
+  },
+
+  {
+    $match: { total: { $gte: 2 } }
+  },
+
+  {
+    $addFields: {
+      variacionPorcentual: {
+        $cond: [
+          { $eq: ["$primera.amount", 0] },
+          null,
+          {
+            $round: [
+              {
+                $multiply: [
+                  {
+                    $divide: [
+                      { $subtract: ["$ultima.amount", "$primera.amount"] },
+                      "$primera.amount"
+                    ]
+                  },
+                  100
+                ]
+              },
+              2
+            ]
+          }
+        ]
+      }
+    }
+  },
+
+  {
+    $project: {
+      _id: 0,
+      account_id: 1,
+      variacionPorcentual: 1
+    }
+  }
+
+])
