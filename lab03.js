@@ -397,3 +397,176 @@ db.accounts.aggregate([
 ])
 
 db.account_summaries.find();
+
+// 2.9 Cree una colección high_value_customers que contenga 
+// los clientes cuyo balance total sea mayor a 30,000 y que 
+// hayan realizado más de 5 transacciones. Incluya su nombre, email, 
+// total_balance y número de transacciones.
+db.customers.aggregate([
+  {
+    $lookup: {
+      from: "accounts",
+      localField: "accounts",
+      foreignField: "account_id",
+      as: "accountData"
+    }
+  },
+
+  {
+    $addFields: {
+      total_balance: { $sum: "$accountData.limit" }
+    }
+  },
+
+  {
+    $lookup: {
+      from: "transactions",
+      localField: "accounts",
+      foreignField: "account_id",
+      as: "transactionData"
+    }
+  },
+
+  {
+    $addFields: {
+      total_transactions: { $sum: "$transactionData.transaction_count" }
+    }
+  },
+
+  {
+    $match: {
+      total_balance: { $gt: 30000 },
+      total_transactions: { $gt: 5 }
+    }
+  },
+
+  {
+    $project: {
+      _id: 0,
+      name: 1,
+      email: 1,
+      total_balance: 1,
+      total_transactions: 1
+    }
+  },
+
+  {
+    $out: "high_value_customers"
+  }
+
+])
+
+db.high_value_customers.find();
+
+// 2.10 Para cada cliente, calcule el promedio mensual de transacciones en el último año y clasifíquelo
+db.transactions.aggregate([
+  { $unwind: "$transactions" },
+
+  {
+    $group: {
+      _id: null,
+      maxDate: { $max: "$transactions.date" }
+    }
+  },
+
+  {
+    $project: {
+      maxDate: 1,
+      cutoffDate: {
+        $dateSubtract: {
+          startDate: "$maxDate",
+          unit: "year",
+          amount: 1
+        }
+      }
+    }
+  },
+
+  {
+    $lookup: {
+      from: "transactions",
+      pipeline: [
+        { $unwind: "$transactions" }
+      ],
+      as: "allData"
+    }
+  },
+
+  { $unwind: "$allData" },
+
+  {
+    $match: {
+      $expr: {
+        $gte: [
+          "$allData.transactions.date",
+          "$cutoffDate"
+        ]
+      }
+    }
+  },
+
+  {
+    $lookup: {
+      from: "customers",
+      localField: "allData.account_id",
+      foreignField: "accounts",
+      as: "customer"
+    }
+  },
+
+  { $unwind: "$customer" },
+
+  {
+    $group: {
+      _id: {
+        customerId: "$customer._id",
+        year: { $year: "$allData.transactions.date" },
+        month: { $month: "$allData.transactions.date" }
+      },
+      name: { $first: "$customer.name" },
+      totalMes: { $sum: 1 }
+    }
+  },
+
+  {
+    $group: {
+      _id: "$_id.customerId",
+      name: { $first: "$name" },
+      promedioMensual: { $avg: "$totalMes" }
+    }
+  },
+
+  {
+    $addFields: {
+      promedioMensual: { $round: ["$promedioMensual", 1] },
+      categoria: {
+        $switch: {
+          branches: [
+            { case: { $lt: ["$promedioMensual", 2] }, then: "infrequent" },
+            {
+              case: {
+                $and: [
+                  { $gte: ["$promedioMensual", 2] },
+                  { $lte: ["$promedioMensual", 5] }
+                ]
+              },
+              then: "regular"
+            },
+            { case: { $gt: ["$promedioMensual", 5] }, then: "frequent" }
+          ],
+          default: "infrequent"
+        }
+      }
+    }
+  },
+
+  {
+    $project: {
+      _id: 0,
+      name: 1,
+      promedioMensual: 1,
+      categoria: 1
+    }
+  }
+
+])
