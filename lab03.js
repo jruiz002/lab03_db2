@@ -290,3 +290,110 @@ db.transactions.aggregate([
   }
 
 ])
+
+// 2.6 Agrupe las transacciones por mes y tipo de transacción.
+// Calcule el total y el promedio por grupo.
+db.transactions.aggregate([
+    
+  { $unwind: "$transactions" },
+
+  {
+    $group: {
+      _id: {
+        year: { $year: "$transactions.date" },
+        month: { $month: "$transactions.date" },
+        tipo: "$transactions.transaction_code"
+      },
+      totalMonto: { $sum: "$transactions.amount" },
+      promedioMonto: { $avg: "$transactions.amount" },
+      cantidad: { $sum: 1 }
+    }
+  },
+
+  {
+    $project: {
+      _id: 0,
+      year: "$_id.year",
+      month: "$_id.month",
+      tipo: "$_id.tipo",
+      totalMonto: 1,
+      promedioMonto: { $round: ["$promedioMonto", 2] },
+      cantidad: 1
+    }
+  }
+
+])
+
+// 2.7 Identifique clientes que no han realizado ninguna 
+// transacción y guárdelos en una nueva colección llamada inactive_customers.
+db.customers.aggregate([
+  {
+    $lookup: {
+      from: "transactions",
+      localField: "accounts",
+      foreignField: "account_id",
+      as: "transactionData"
+    }
+  },
+
+  {
+    $match: {
+      transactionData: { $eq: [] }
+    }
+  },
+
+  {
+    $project: {
+      _id: 1,
+      name: 1,
+      email: 1,
+      accounts: 1
+    }
+  },
+
+  {
+    $merge: {
+      into: "inactive_customers",
+      whenMatched: "replace",
+      whenNotMatched: "insert"
+    }
+  }
+
+])
+
+// 2.8 Para cada tipo de cuenta, actualice un documento resumen en 
+// una colección account_summaries que contenga el total de cuentas 
+// y el balance promedio por tipo
+db.accounts.aggregate([
+
+  { $unwind: "$products" },
+
+  {
+    $group: {
+      _id: "$products",
+      totalAccounts: { $sum: 1 },
+      averageBalance: { $avg: "$limit" }
+    }
+  },
+
+  {
+    $sort: { _id: 1 }
+  },
+
+  {
+    $project: {
+      _id: 0,
+      accountType: "$_id",
+      totalAccounts: 1,
+      averageBalance: { $round: ["$averageBalance", 2] },
+      lastUpdated: "$$NOW"
+    }
+  },
+
+  {
+    $out: "account_summaries"
+  }
+
+])
+
+db.account_summaries.find();
